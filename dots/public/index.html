@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/html">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<meta name="Description" content="Play online multiplayer Dots and Boxes game with friends. Node.js game">
+    <title>Dots and Boxes :')</title>
+	<script src="/js/libraries/chilly-0.2.js"></script>
+	<script type="text/javascript" src="crafty.js"></script>
+	<script type="text/javascript" src="jquery.js"></script>
+	<link rel="stylesheet" href="/css/styles.css" type="text/css" />
+	<link rel="stylesheet" href="/css/simplegrid.css" type="text/css" />
+
+</head>
+<body>
+<script type="text/javascript">
+	var player = 0, gameOver = false;
+	var myID = "";
+	var gameID = "";
+
+	var myColor = "";
+	var opColorArray = [];
+	var box = new Array();
+	var waiting = true;
+	var verPoints = 4;
+	var horPoints = 4;
+	var nowPlayer = "";
+
+	$(document).on('offline', function (event) {
+		//alert('You are ' + event.type + '!');
+		console.log("offline");
+	});
+	
+	function gameOverUI(){
+		
+	}
+
+	function manualLongPollUpdate(){
+		console.log("manual update of 40 seconds");
+		//Chilly.longPoll();
+		updateMe();
+	}
+	
+	var updateMeLocked = false;
+	
+	function updateMe(){
+		if(updateMeLocked) return;
+		updateMeLocked = true;
+		console.log("Update me called");
+		Chilly.request('updateme', {
+                data: {updateme: true},
+                success: function (data) {
+					updateMeLocked = false;
+                    console.log('update me sent');
+                },
+				error : function(){
+					updateMeLocked = false;
+				}
+            });
+	}
+	
+	var manual_update = setInterval(manualLongPollUpdate, 5000);
+	
+    window.onload = function() {
+	
+		initGame();
+	
+		Chilly.bind('disconnect', function(e) {
+			clearInterval(manual_update);
+			manualLongPollUpdate();
+		});
+		
+		if(getQueryVariable('action')=='rejoin')
+			joinGame();
+		
+		/**
+         * Definitions
+         */
+        // defines a new channel "Chat", define what happens when a Chat event is received
+        Chilly.listen('chat', function(msg){
+			console.log('chat event received.'+JSON.stringify(msg));
+			renderChat(msg);
+		});
+		
+        /**
+         * Definitions
+         */
+        // defines a new channel "update", define what happens when a update event is received
+        Chilly.listen('update', function(msg){
+			
+			clearInterval(manual_update);
+			manual_update = setInterval(manualLongPollUpdate, 5000);
+		
+            console.log('Update event received.');
+            console.log(msg);
+			
+			
+			if(msg.action=="updateme"){
+				switchNowPlayer(msg.nowplayer, msg.timeLeft);
+				opColorArray = msg.opcolor;
+				playerColors();
+				if(msg.restore !== undefined && msg.restore)
+					restoreSession(msg.restore);
+				console.log('user updated with updateme');
+			}
+			
+			if(msg.action=="joined"){
+				console.log("JOINED::::"+msg.restore);
+				switchNowPlayer(msg.nowplayer, msg.timeLeft);
+				opColorArray = msg.opcolor;
+				playerColors();
+				if(msg.restore !== undefined && msg.restore)
+					restoreSession(msg.restore);
+				opColorArray = msg.opcolor;
+				playerColors();
+			}
+			
+			if(msg.action=="nextUser"){
+				switchNowPlayer(msg.nowplayer, msg.timeLeft);
+			}
+			
+			if(msg.action=="played"){
+				if(msg.value.action=="move"){
+					if(msg.requestedBy != myID)
+						opClickedOnBox(msg.value, msg.requestedBy);
+					//$('#dfku').append('<br>'+msg.requestedBy+' move '+JSON.stringify(msg.value.value)+ ' :aquired'+ msg.value.aquired);
+					switchNowPlayer(msg.value.nowplayer, msg.timeLeft);
+					
+				}else if(msg.value.action="win"){
+					if(msg.requestedBy != myID)
+						opClickedOnBox(msg.value, msg.requestedBy);
+					if(msg.value.user == myID){
+						alert("You win");
+						$(".currentPlayer").text("You win").css({color:myColor});
+						
+					}else{
+						alert("You lose! \n"+ msg.value.user+" wins the game");
+						$(".currentPlayer").text("Opponents win").css({color:opColorArray[msg.value.user]});
+					}
+					gameOver = true;
+					//$('#dfku').append('<br>'+msg.requestedBy+' win the game');
+				}
+				
+			}
+			
+			if(msg.action=="newgame"){
+				alert('new game');
+				restartGame();
+				switchNowPlayer(msg.starter, msg.timeLeft);
+
+				//$('#dfku').append('<br>'+msg.requestedBy+' requested new game start by '+msg.starter);
+			}
+			
+			if(msg.action=="leavegame"){
+				if(msg.gameID == gameID){
+					if(msg.requestedBy != myID){
+						
+						switchNowPlayer(msg.nowplayer, msg.timeLeft);
+						alert("Opponent left the game");
+						restartGame();
+						login();
+					}
+				}
+				//$('#dfku').append('<br>'+msg.requestedBy+' left the GAME ID '+msg.gameID);
+			}
+			
+        });
+		
+		login();
+		
+        
+    };
+      
+        /**
+         * Login
+         */
+        function login(){
+		
+			Chilly.request('isLoggedIn', {
+				data: {},
+				success:function (data) {
+					
+					Chilly.init();
+					Chilly.longPoll();
+					myID = (data.data.myid);
+					$('#myid').html(myID);
+					$('#myavatar').attr("src", "/image?s=64&id="+myID);
+					myColor = (data.data.mycolor);
+					opColorArray = data.data.opcolor;
+					playerColors();
+					if(data.data.restore !== undefined && data.data.restore)
+						restoreSession(data.data.restore);
+
+					switchNowPlayer(data.data.nowplayer, data.data.timeLeft);
+					gameIdUpdate(data.data.gameid);
+					
+					//$('#dfku').append('<br>now player : '+data.data.nowplayer);
+					//$('#dfku').append('<br>client colors : '+JSON.stringify(data.data.opcolor));
+				},
+				error: function(data) {
+					
+					var username = prompt("Please enter your name","");
+						if(username=="")
+							username = 'user' + Math.floor(Math.random()*1001);
+						Chilly.request('login', {
+							data: {
+								username: username
+							},
+							success:function (data) {
+								Chilly.init();
+								Chilly.longPoll();
+								myColor = (data.data.mycolor);
+								//opColor = (data.data.opcolor);
+								myID = (data.data.myid);
+								$('#myid').html(myID);
+								$('#myavatar').attr("src", "/image?s=64&id="+myID);
+								if(data.data.restore !== undefined && data.data.restore)
+									restoreSession(data.data.restore);
+								
+								gameIdUpdate(data.data.gameid);
+								opColorArray = data.data.opcolor;
+								playerColors();
+								
+								switchNowPlayer(data.data.nowplayer, data.data.timeLeft);
+								
+								//$('#dfku').append('<br>now player : '+data.data.nowplayer);
+								//$('#dfku').append('<br>client colors : '+JSON.stringify(data.data.opcolor));
+							},
+							error: function(data) {
+								alert("final error");
+								Chilly.init();
+								Chilly.longPoll();
+								myColor = (data.data.mycolor);
+								//opColor = (data.data.opcolor);
+								if(data.data.restore !== undefined && data.data.restore)
+									restoreSession(data.data.restore);
+								
+								gameIdUpdate(data.data.gameid);
+								opColorArray = data.data.opcolor;
+								playerColors();
+								
+								switchNowPlayer(data.data.nowplayer, data.data.timeLeft);
+								
+								//$('#dfku').append('<br>now player : '+data.data.nowplayer);
+								//$('#dfku').append('<br>client colors : '+JSON.stringify(data.data.opcolor));
+							}
+						});
+				}
+			});
+			
+			
+		}
+		
+
+	
+	function gamePlayed(row, col, type, callback){
+		Chilly.request('played', {
+                data: {
+                    row: row,
+					col: col,
+					type: type
+                },
+                success: function (data) {
+                    console.log(data);
+					if(callback !== undefined) callback();
+                }
+            });
+	}
+	
+	function newGame(){
+		Chilly.request('newgame', {
+                data: {
+                    newgame: true
+                },
+                success: function (data) {
+                    console.log('Message sent successfully.');
+                }
+            });
+	}
+	
+	function leaveGame(){
+		Chilly.request('leavegame', {
+                data: {
+                    leave: true
+                },
+                success: function (data) {
+					//restartGame();
+					//login();
+                    console.log('Left game');
+					window.top.location = "left.html";
+                }
+            });
+			
+	}
+	
+	function joinGame(){
+		Chilly.request('joingame', {
+                data: {
+                    join: true
+                },
+                success: function (data) {
+					alert("Joined to a game");
+                }
+            });
+	}
+	
+	function sendChat(){
+		Chilly.request('sendChat', {
+                data: {
+                    message: $('#dae4w').val()
+                },
+                success: function (data) {
+                    console.log('Message sent successfully.');
+                }
+            });
+		$('#dae4w').val('');
+	}
+	
+	function getQueryVariable(variable){ 
+	  var query = window.location.search.substring(1); 
+	  var vars = query.split("&"); 
+	  for (var i=0;i<vars.length;i++)
+	  { 
+		var pair = vars[i].split("="); 
+		if (pair[0] == variable)
+		{ 
+		  return pair[1]; 
+		} 
+	  }
+	  return -1; //not found 
+	}
+
+	
+	
+	var gameState = new Array();
+	function gameIdUpdate(id){
+		gameID = id;
+		//$('#dfku').append('<br>GAMEID: '+id);
+	}
+	
+	var defaultColor = 'rgb(230,230,230)';
+	var dotsDefaultColor = 'rgb(100,100,100)';
+	var defaultBoxColor = '#fff';
+	
+	function initGame(){
+		horEdges = new Array();
+		verEdges = new Array();
+		box = new Array();
+		
+		Crafty.init(400, 400);
+		Crafty.canvas.init();
+		
+		$(".currentPlayer").text("Waiting").css({color:'#FF0000'});
+		
+		Crafty.audio.add("played", "played.ogg");
+
+		fullId = 0;var i=0;
+		var offset = -0;
+
+		
+		//horizontal
+		for(var i=0; i<verPoints+1; i++){
+			horEdges[i] = new Array();
+			for(var j=0; j<horPoints; j++)
+			horEdges[i][j] = Crafty.e("2D, DOM, Color, Mouse, Text, Tween").color(defaultColor).attr({ x: 100+j*52 + offset, y: 100+i*52 + offset, w: 50, h: 10, row: i, col: j, type:'hor', disabled: false })
+				.bind('Click', clickedOnBox)
+				.bind('MouseOver', mouseOverBox)
+				.bind('MouseOut', mouseOutBox);
+		}
+		
+		//vertical
+		for(var i=0; i<verPoints ; i++){
+			verEdges[i] = new Array();
+			for(var j=0; j<horPoints+1; j++)
+			verEdges[i][j] = Crafty.e("2D, DOM, Color, Mouse, Text, Tween").color(defaultColor).attr({ x: 100+j*52 + offset, y: 100+i*52 + offset, w: 10, h: 50, row: i, col: j, type:'ver', disabled: false })
+				.bind('Click', clickedOnBox)
+				.bind('MouseOver', mouseOverBox)
+				.bind('MouseOut', mouseOutBox);
+		}
+			
+		//dots GUI
+		for(var i=0; i<verPoints+1; i++)
+			for(var j=0; j<horPoints+1; j++){
+				new Crafty.circle(5, 5, 5);
+				Crafty.e("2D, DOM, Color").color(dotsDefaultColor).attr({ x: 99+j*52 + offset, y: 99+i*52 + offset, w: 12, h: 12, row: i, col: j, id:fullId, disabled: false })
+			}
+				
+		//boxes
+		for(var i=0; i<verPoints ; i++){
+			box[i] = new Array();
+			gameState[i] = new Array();
+			
+			for(var j=0; j<horPoints; j++){
+				gameState[i][j] = new Array();
+				gameState[i][j]['left'] = 0;
+				gameState[i][j]['right'] = 0;
+				gameState[i][j]['top'] = 0;
+				gameState[i][j]['bottom'] = 0;
+				gameState[i][j]['taken'] = '';
+				
+				box[i][j] =	Crafty.e("2D, DOM, Color, Mouse, Text, Tween").color(defaultBoxColor).attr({ x: 112+j*52 + offset, y: 112+i*52 + offset, w: 38, h: 38, row: i, col: j, id:fullId });
+			}
+		}
+	}
+	
+	function restoreSession(board){
+		console.log(board);
+		//alert('sad');
+		for(var i=0; i<verPoints; i++)
+			for(var j=0; j<horPoints; j++){
+				gameState[i][j]['left'] = board[i+':'+j]['l'];
+				gameState[i][j]['right'] = board[i+':'+j]['r'];
+				gameState[i][j]['top'] = board[i+':'+j]['t'];
+				gameState[i][j]['bottom'] = board[i+':'+j]['b'];
+				gameState[i][j]['taken'] = board[i+':'+j]['a'];
+			}
+			
+		reDraw();
+	}
+	
+	function reDraw(){
+		console.log(gameState);
+		for(var i=0; i<verPoints; i++)
+			for(var j=0; j<horPoints; j++){
+				if(gameState[i][j]['left']==1){
+					verEdges[i][j]/*.attr({alpha: 0.4})*/.color('#343434')/*.tween({alpha: 1.0}, 100)*/;
+					verEdges[i][j].disabled = true;
+				}
+				
+				if(gameState[i][j]['right']==1){
+					verEdges[i][j+1]/*.attr({alpha: 0.4})*/.color('#343434')/*.tween({alpha: 1.0}, 100)*/;
+					verEdges[i][j+1].disabled = true;
+				}
+				
+				if(gameState[i][j]['top']==1){
+					horEdges[i][j]/*.attr({alpha: 0.4})*/.color('#343434')/*.tween({alpha: 1.0}, 100)*/;
+					horEdges[i][j].disabled = true;
+				}
+				
+				if(gameState[i][j]['bottom']==1){
+					horEdges[i+1][j]/*.attr({alpha: 0.4})*/.color('#343434')/*.tween({alpha: 1.0}, 100)*/;
+					horEdges[i+1][j].disabled = true;
+				}
+				
+				if(gameState[i][j]['taken'] != ''){	
+					var takenUser = gameState[i][j]['taken'];
+					if(takenUser == myID)
+						box[i][j]/*.attr({alpha: 0.4})*/.color(myColor)/*.tween({alpha: 1.0}, 100)*/;
+					else{
+						console.log(opColorArray[takenUser]);
+						var opC = "";
+						if(opColorArray[takenUser]=='' || opColorArray[takenUser]==undefined)
+							opC='#bbb';
+						else
+							opC=opColorArray[takenUser];
+						box[i][j]/*attr({alpha: 0.4})*/.color(opC)/*.tween({alpha: 1.0}, 100)*/;
+					}
+				}
+					
+		
+				
+			}
+	}
+	
+	function clickedOnBox(){
+		if(this.disabled || gameOver || waiting) return;
+		checkIfTaken(this.row, this.col, this.type);
+		
+		$(".currentPlayer").text("Now: opponent").css({color:defaultColor});
+		
+		gamePlayed(this.row, this.col, this.type, function(that){
+			that.attr({alpha: 0.4}).color('#343434').tween({alpha: 1.0}, 100);
+			that.disabled = true;	
+		}(this));	
+
+			
+	}
+	
+	//for local check
+	function  checkIfTaken(row, col, type){
+		var aq = new Array();
+		if(type=='ver'){
+			if(col < horPoints){
+				gameState[row][col]['left'] = 1;
+				if(checkBox(row, col))
+					aq.push(row, col);
+			}
+			if(col-1 >= 0){
+				gameState[row][col-1]['right']= 1;
+				if(checkBox(row, col-1))
+					aq.push(row, col-1);
+			}
+		}
+		
+		if(type=='hor'){
+			if(row < verPoints) {
+				gameState[row][col]['top'] = 1; 
+				if(checkBox(row, col))
+					aq.push(row, col);
+			} 
+			if(row-1 >= 0) {
+				gameState[row-1][col]['bottom'] = 1; 
+				if(checkBox(row-1, col))
+					aq.push(row-1, col);
+			}
+		}
+		
+		if(aq.length > 0)
+			waiting = false;
+		else
+			waiting = true;
+		console.log(gameState);
+	}
+	
+	//server
+	function checkBox(x, y){
+		if(gameState[x][y]['left']==1 && 
+		   gameState[x][y]['right']==1 &&
+		   gameState[x][y]['top']==1 &&
+		   gameState[x][y]['bottom']==1){
+				gameState[x][y]['taken'] = myID;
+				box[x][y].attr({alpha: 0.4}).color(myColor).tween({alpha: 1.0}, 100);
+
+				return true;
+			}
+	}
+	
+	
+	function mouseOverBox(){
+		if(this.disabled || gameOver || waiting) return;
+		this.color("#343434");
+	}
+	
+	function mouseOutBox(){
+		if(this.disabled || gameOver || waiting) return;
+		this.color(defaultColor);
+	}
+	
+	function opClickedOnBox(obj, user){
+		
+		if(obj.value.type=="ver"){
+			verEdges[obj.value.row][obj.value.col].attr({alpha: 0.4}).color('#343434').tween({alpha: 1.0}, 100);
+			verEdges[obj.value.row][obj.value.col].disabled = true;
+			if(obj.value.col < horPoints){ gameState[obj.value.row][obj.value.col]['left'] = 1; }
+			if(obj.value.col-1 >= 0){ gameState[obj.value.row][obj.value.col-1]['right']= 1; }
+		}else if(obj.value.type=="hor"){
+			horEdges[obj.value.row][obj.value.col].attr({alpha: 0.4}).color('#343434').tween({alpha: 1.0}, 100);
+			horEdges[obj.value.row][obj.value.col].disabled = true;
+			if(obj.value.row < verPoints) { gameState[obj.value.row][obj.value.col]['top'] = 1; } 
+			if(obj.value.row-1 >= 0) { gameState[obj.value.row-1][obj.value.col]['bottom'] = 1; }
+		}
+		//alert(JSON.stringify(obj.aquired));
+		if(obj.aquired.length > 0){
+			for(var i in obj.aquired)
+				box[obj.aquired[i][0]][obj.aquired[i][1]].attr({alpha: 0.4}).color(opColorArray[user]).tween({alpha: 1.0}, 100);
+		}
+		Crafty.audio.play("played");
+		switchNowPlayer(obj.nowPlayer, obj.timeLeft);
+		
+	}
+	
+	function restartGame(){
+		Crafty.stop(true);
+		gameOver = false;
+		initGame();
+	}
+	
+	var count = 10;
+	
+	var isMainTitle = true;
+	var mainTitle = "";
+	var titleIntervalId = null;
+	var blinkStarted = false;
+	
+	function StartBlinkHtmlTitle(){
+		if(blinkStarted) return;
+		blinkStarted = true;
+		mainTitle = $(document).attr('title');
+		titleIntervalId = setInterval(function(){
+			if(isMainTitle){
+				$(document).attr('title', 'Your Turn!');
+			}else{
+				$(document).attr('title', mainTitle);
+			}
+			
+			isMainTitle = !isMainTitle;
+		}, 1500);
+	}
+	
+	function StopBlinkHtmlTitle(){
+		clearInterval(titleIntervalId);
+		$(document).attr('title', mainTitle);
+		isMainTitle = true;
+		blinkStarted = false;
+	}
+	
+	function switchNowPlayer(uid, time){
+		nowPlayer = uid;
+		
+		if(nowPlayer == myID)
+			waiting = false;
+		else
+			waiting = true;
+			
+		if(nowPlayer == myID){
+			StartBlinkHtmlTitle();	
+			$(".currentPlayer").text("Your turn").css({color:myColor});
+		}else{
+			StopBlinkHtmlTitle();
+			$(".currentPlayer").text("Now : "+nowPlayer).css({color:opColorArray[nowPlayer]});
+		}
+		
+		$('.uc').removeClass('selected');
+		$('#spn'+ nowPlayer).addClass('selected');
+		
+		/*
+		count = time;
+		
+		var counter = setInterval(timer, 1000);
+		function timer(){
+		  count=count-1;
+		  if (count <= 0){
+			 clearInterval(counter);
+			 return;
+		  }
+		  $('#timer').html(count);
+		}*/
+	}
+	
+	function playerColors(){
+		var html = "";
+		$.each(opColorArray, function(k, v){
+			html += "<img class='avatar' src='/image?s=20&id="+k+"' /><span class='uc' id='spn"+ k +"' style='background-color:"+v+"'> "+ k +"</span>";
+		});
+		
+		$('#ucolor').html(html);
+		$('.uc').removeClass('selected');
+		$('#spn'+ nowPlayer).addClass('selected');
+		
+	}
+	
+	function renderChat(msg){
+		var html = "<div>";
+		html += "<img src='/image?s=32&id="+msg.player+"' /><div class='cuser' style='background-color:"+opColorArray[msg.player]+"'>"+msg.player+"</div>";
+		html += "<div class='ccont'>"+msg.message+"</div></div>";
+		
+		$('#dfku').append(html);
+		var objDiv = document.getElementById("chatwrppr");
+		objDiv.scrollTop = objDiv.scrollHeight;
+	}
+	
+	//chat button
+	$(document).ready(function(){
+		$('#dae4w').bind("enterKey",function(e){
+			   sendChat();
+			});
+			$('#dae4w').keyup(function(e){
+		if(e.keyCode == 13)
+		{
+		  $(this).trigger("enterKey");
+		}
+		});
+	});
+	</script>
+
+<style>
+body{font-size:12px;}
+.uc{padding:5px;margin:3px;color: #fff;border-radius: 5px;margin-right:10px;}
+.selected{color:rgba(255,255,255,1);font-size:15px;}
+.cuser{padding:3px;border-radius: 3px;color:#fff;margin:3px;display:inline-block;vertical-align:top;}
+.ccont{display:inline-block;max-width:200px;vertical-align:top;}
+#myid{font-size:30px;}
+#myavatar{vertical-align: middle;}
+.avatar{vertical-align: middle;}
+</style>
+	<div class="grid grid-pad">
+	<div class="col-7-12">
+		<div style="height:30px;width:500px;">
+			<div id="ucolor"></div>
+		</div>
+		<div class="user-notify">
+			<div class="currentPlayer">Loading..</div>
+		</div>
+		
+		<div id="cr-stage"></div>
+	</div>
+	<div class="col-5-12">
+		<div>
+		<span id="timer"></span>
+		<div>
+			<img src="" id="myavatar" />
+			<span id="myid" ></span>
+		</div>
+		<ul class="buttons">
+		<li><input type="button" onclick="newGame();return false;" class="w8-button l-blue" value="New Game"/></li>
+		<!--<li><input type="button" onclick="leaveGame();return false;" class="w8-button grey" value="Leave Game"/></li>-->
+		<!--<li><input type="button" onclick="joinGame();return false;" class="w8-button red" value="Join Game"/></li>-->
+		</ul>
+		<hr>
+
+		<div style="height:300px;overflow-y:scroll;overflow-x: hidden;" id="chatwrppr">
+		<div id="dfku"></div>
+		</div>
+
+		
+		<div style="width:100%;">
+			<div style="width:80%;float: left;">
+				<textarea id="dae4w" style="width:100%;height:33px;" class="smalltext textbox"></textarea>
+			</div>
+			<div style="width:20%;float: left;">
+				<a href="#" onclick="sendChat();return false;" class="w8-button yellow" style="display:inline-block">Send</a>
+			</div>
+		</div>
+		</div>
+	</div>
+
+	</div>
+
+</body>
+<center>
+<footer style="clear:both;" id="foot">
+<table style="font-size:12px;color:gray;" cellpadding=10>
+<tr><td colspan=4>
+<script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+<!-- 728x90 MAIN -->
+<ins class="adsbygoogle"
+     style="display:inline-block;width:728px;height:90px"
+     data-ad-client="ca-pub-4695028025554940"
+     data-ad-slot="4132315094"></ins>
+<script>
+if (document.location.hostname != "localhost")
+	(adsbygoogle = window.adsbygoogle || []).push({});
+</script></td></tr>
+<tr>
+<td><center><a href="http://nodejs.org/" ><img src="images/nodejs.png" width=70></a></td>
+<td><center><a href="http://chillyframework.com/" ><img src="images/chilly.png" width=70></a></td>
+<td><center><a href="http://craftyjs.com/" ><img src="images/crafty.png" width=70></a></td>
+<td><center><a href="http://appfog.com/" ><img src="images/appfog.png" width=70></a></td>
+</tr><tr>
+<td>Backend by Node.js</td>
+<td>Node.js multiplayer framework</td>
+<td>HTML5 Game frontend</td>
+<td>Cloud Hosting by AppFog</td>
+</tr>
+</table>
+</footer>
+</center>
+</html>

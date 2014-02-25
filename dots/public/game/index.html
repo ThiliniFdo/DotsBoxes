@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<head>	
+	<script type="text/javascript" src="crafty.js"></script>
+</head>
+<body>
+	<script type="text/javascript">
+	var player = 0;
+	gameOver = false;
+	var count = new Array();
+	count[0] = 0;
+	count[1] = 0;
+	var userBox = new Array();
+	userBox[0] = new Array();
+	userBox[1] = new Array();
+	var colors = new Array();
+	colors[0] = "#FF0000";
+	colors[1] = "#00FF00";
+	
+	var winningCombinations = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+	
+		Crafty.init(400, 500);
+		Crafty.e("CurrentPlayer, DOM, 2D, Text, Color")
+		.attr({ x: 20, y: 20, w: 100, h: 20, points: 0 })
+		.text("Player 1").textColor('#FF0000', 1);
+
+		fullId = 0;
+		for(var i=0; i<3; i++)
+			for(var j=0; j<3; j++, fullId++)
+				Crafty.e("2D, DOM, Color, Mouse, Text").color('rgb(100,100,100)').attr({ x: 100+j*52, y: 100+i*52, w: 50, h: 50, row: i, col: j, id:fullId, disabled: false }).bind('Click', clickedOnBox);
+	
+	
+	function checkWinner(userInps){
+		for(var i=0; i<winningCombinations.length; i++)
+			if(superbag(userInps, winningCombinations[i]))
+				return true;
+		return false;
+	}
+	
+	
+	function clickedOnBox(){
+		if(this.disabled || gameOver) return;
+		
+		userBox[player].push(this.id);
+		if(userBox[player].length>2)
+			if(checkWinner(userBox[player])){
+				Crafty("CurrentPlayer").each(function () { 
+					this.text("Player "+(player+1)+" win").textColor(colors[player], 1);
+				});
+				gameOver = true;
+			}
+		this.text(this.row +" "+this.col+"::"+ this.id);
+
+		if(player==1){
+			this.color('rgb(0,255,0)');
+		}else{
+			this.color('rgb(255,0,0)');
+		}
+		
+		this.disabled = true;
+		count[player]++;
+		console.log(userBox);
+		player = player?0:1;
+		
+		if(!gameOver) Crafty("CurrentPlayer").each(function () { 
+			this.text("Player "+(player+1)).textColor(colors[player], 1);
+		});
+		
+	}
+	
+	function superbag(sup, sub) {
+    sup.sort();
+    sub.sort();
+    var i, j;
+    for (i=0,j=0; i<sup.length && j<sub.length;) {
+        if (sup[i] < sub[j]) {
+            ++i;
+        } else if (sup[i] == sub[j]) {
+            ++i; ++j;
+        } else {
+            // sub[j] not in sup, so sub not subbag
+            return false;
+        }
+    }
+    // make sure there are no elements left in sub
+    return j == sub.length;
+}
+	
+	</script>
+</body>
+</html>
